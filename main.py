@@ -15,7 +15,7 @@ if __name__ == '__main__':
     opts.hidden_dim = 64
     opts.attention_dim = 5
     opts.n_layer = 5
-    opts.batch_size = 10
+    opts.batch_size = 20
     opts.act = 'idd'
     opts.lamb = 0.000132
     epochs = 10

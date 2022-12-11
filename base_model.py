@@ -16,16 +16,14 @@ class BaseModel(object):
         self.tred_gnn.cuda()
         self.optimizer = torch.optim.Adam(self.tred_gnn.parameters(), lr=opts.lr, weight_decay=opts.lamb)
         self.train_history = []
-        self.loss_history = []
-
 
     def train(self, output=True):
         if self.data.time_length_train - self.n_layer < 0:
             raise Exception('Error!')
         self.tred_gnn.train()
-
-        # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 20), file=sys.stdout):
-        for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train)):
+        loss_history = []
+        for time_stamp in tqdm(range(self.n_layer, self.n_layer + 20), file=sys.stdout):
+            # for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train)):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
             for i in range(num_batch):
@@ -38,12 +36,14 @@ class BaseModel(object):
                 pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
                 loss = torch.sum(- pos_scores + torch.log(torch.sum(torch.exp(scores), 1)))
                 loss.backward()
-                self.loss_history.append(loss.item())
+                loss_history.append(loss.item())
                 self.optimizer.step()
+        loss_average = sum(loss_history) / len(loss_history)
         mrr, ht1, ht10 = self.evaluate()
-        self.train_history.append((mrr, ht1, ht10))
+        self.train_history.append((loss_average, mrr, ht1, ht10))
+
         if output:
-            print('mrr : ', mrr, ' hist@1 : ', str(ht1), ' hist@10 : ' + str(ht10))
+            print('loss : ', loss_average, ' mrr : ', mrr, ' hist@1 : ', str(ht1), ' hist@10 : ' + str(ht10))
 
     def evaluate(self, data_eval='valid'):
         if data_eval == 'valid':
@@ -60,8 +60,8 @@ class BaseModel(object):
 
         self.tred_gnn.eval()
         ranks = []
-        for time_stamp in range(start_time_stamp, end_time_stamp):
-            # for time_stamp in range(start_time_stamp, start_time_stamp + 5):
+        # for time_stamp in range(start_time_stamp, end_time_stamp):
+        for time_stamp in range(start_time_stamp, start_time_stamp + 5):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
 

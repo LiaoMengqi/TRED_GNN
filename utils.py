@@ -127,15 +127,15 @@ class Dataloader(object):
 
 
 def cal_ranks(scores, labels):
-    row_index=np.arange(scores.shape[0])
+    row_index = np.arange(scores.shape[0])
     scores - np.min(scores, axis=1, keepdims=True) + 1e-8
     rank = rankdata(-scores, axis=1)
-    rank = rank[row_index,labels]
+    rank = rank[row_index, labels]
     return list(rank)
 
 
 def cal_performance(ranks):
     mrr = (1. / ranks).sum() / len(ranks)
     h_1 = sum(ranks <= 1.0) / len(ranks)
-    h_10 = sum(ranks <= 10.0)  / len(ranks)
+    h_10 = sum(ranks <= 10.0) / len(ranks)
     return mrr, h_1, h_10
