@@ -15,10 +15,12 @@ if __name__ == '__main__':
     opts.hidden_dim = 64
     opts.attention_dim = 5
     opts.n_layer = 5
-    opts.batch_size = 20
+    opts.batch_size = 10
     opts.act = 'idd'
-    opts.lamb = 0.000132
-    epochs = 10
+    opts.lamb = 0.00015
+    opts.dropout = 0.1
+    epochs = 5
+
     model = base_model.BaseModel(opts)
     for epoch in range(epochs):
         print("epoch ", epoch + 1, ":")

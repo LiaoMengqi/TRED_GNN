@@ -22,22 +22,31 @@ class BaseModel(object):
             raise Exception('Error!')
         self.tred_gnn.train()
         loss_history = []
-        for time_stamp in tqdm(range(self.n_layer, self.n_layer + 20), file=sys.stdout):
-            # for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train)):
+        # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 100), file=sys.stdout):
+        for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train), file=sys.stdout):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
             for i in range(num_batch):
                 indexes = range(i * self.batch_size, min((i + 1) * self.batch_size, num_query))
                 data_batched = torch.tensor(self.data.get_batch(time_stamp, indexes)).cuda()
-                # ans=data_batched[:,2]
+
                 self.tred_gnn.zero_grad()
                 scores = self.tred_gnn.forward(time_stamp, data_batched[:, 0], data_batched[:, 1])
-                # utils.cal_ranks(scores,ans)
+
                 pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
-                loss = torch.sum(- pos_scores + torch.log(torch.sum(torch.exp(scores), 1)))
+                max_n = torch.max(scores, 1, keepdim=True)[0]
+                loss = torch.sum(- pos_scores + max_n + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
                 loss.backward()
                 loss_history.append(loss.item())
                 self.optimizer.step()
+
+                # acoid NaN
+                for para in self.tred_gnn.parameters():
+                    para_data = para.data.clone()
+                    flag = para_data != para_data
+                    para_data[flag] = np.random.random()
+                    para.data.copy_(para_data)
+
         loss_average = sum(loss_history) / len(loss_history)
         mrr, ht1, ht10 = self.evaluate()
         self.train_history.append((loss_average, mrr, ht1, ht10))
@@ -47,7 +56,6 @@ class BaseModel(object):
 
     def evaluate(self, data_eval='valid'):
         if data_eval == 'valid':
-            # 100 30 30
             start_time_stamp = self.data.time_length_train + self.n_layer
             end_time_stamp = self.data.time_length_train + self.data.time_length_valid
         elif data_eval == 'test':
@@ -60,8 +68,8 @@ class BaseModel(object):
 
         self.tred_gnn.eval()
         ranks = []
-        # for time_stamp in range(start_time_stamp, end_time_stamp):
-        for time_stamp in range(start_time_stamp, start_time_stamp + 5):
+        for time_stamp in tqdm(range(start_time_stamp, end_time_stamp), file=sys.stdout):
+            # for time_stamp in range(start_time_stamp, start_time_stamp + 5):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
 

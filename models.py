@@ -21,14 +21,23 @@ class TRED_GNN(nn.Module):
                 GNNLayer(self.hidden_dim, self.hidden_dim, self.attention_dim, self.num_relation, act=act))
         self.gnn_layers = nn.ModuleList(self.gnn_layers)
         self.W_final = nn.Linear(self.hidden_dim, 1, bias=False)
+        self.gate = nn.GRU(self.hidden_dim, self.hidden_dim)
+        self.dropout = nn.Dropout(params.dropout)
 
     def forward(self, time_stamp, subject, relation):
         num_query = subject.shape[0]
         nodes = torch.cat([torch.arange(num_query).unsqueeze(1).cuda(), subject.unsqueeze(1)], 1)
         hidden = torch.zeros(num_query, self.hidden_dim).cuda()
+        h0 = torch.zeros((1, num_query, self.hidden_dim)).cuda()
+
         for i in range(self.n_layer):
             nodes, edges, idx = self.data.get_neighbors(nodes.data.cpu().numpy(), time_stamp - self.n_layer + i)
             hidden = self.gnn_layers[i](subject, relation, hidden, edges, nodes.size(0), idx)
+            h0 = torch.zeros(1, nodes.size(0), hidden.size(1)).cuda().index_copy_(1, idx, h0)
+            hidden = self.dropout(hidden)
+            hidden, h0 = self.gate(hidden.unsqueeze(0), h0)
+            hidden = hidden.squeeze(0)
+
         scores = self.W_final(hidden).squeeze(-1)
         scores_all = torch.zeros((num_query, self.num_entity)).cuda()
         scores_all[[nodes[:, 0], nodes[:, 1]]] = scores
