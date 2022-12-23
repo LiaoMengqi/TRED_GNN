@@ -16,13 +16,13 @@ class BaseModel(object):
         self.tred_gnn.cuda()
         self.optimizer = torch.optim.Adam(self.tred_gnn.parameters(), lr=opts.lr, weight_decay=opts.lamb)
         self.train_history = []
+        self.loss_history = []
 
     def train(self, output=True):
         if self.data.time_length_train - self.n_layer < 0:
             raise Exception('Error!')
         self.tred_gnn.train()
-        loss_history = []
-        # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 100), file=sys.stdout):
+        # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 40), file=sys.stdout):
         for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train), file=sys.stdout):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
@@ -37,7 +37,7 @@ class BaseModel(object):
                 max_n = torch.max(scores, 1, keepdim=True)[0]
                 loss = torch.sum(- pos_scores + max_n + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
                 loss.backward()
-                loss_history.append(loss.item())
+                self.loss_history.append(loss.item())
                 self.optimizer.step()
 
                 # acoid NaN
@@ -46,13 +46,11 @@ class BaseModel(object):
                     flag = para_data != para_data
                     para_data[flag] = np.random.random()
                     para.data.copy_(para_data)
-
-        loss_average = sum(loss_history) / len(loss_history)
         mrr, ht1, ht10 = self.evaluate()
-        self.train_history.append((loss_average, mrr, ht1, ht10))
+        self.train_history.append((self.loss_history[-1], mrr, ht1, ht10))
 
         if output:
-            print('loss : ', loss_average, ' mrr : ', mrr, ' hist@1 : ', str(ht1), ' hist@10 : ' + str(ht10))
+            print('loss : ', self.loss_history[-1], ' mrr : ', mrr, ' hist@1 : ', str(ht1), ' hist@10 : ' + str(ht10))
 
     def evaluate(self, data_eval='valid'):
         if data_eval == 'valid':
@@ -68,8 +66,8 @@ class BaseModel(object):
 
         self.tred_gnn.eval()
         ranks = []
+        # for time_stamp in tqdm(range(start_time_stamp, start_time_stamp + 5), file=sys.stdout):
         for time_stamp in tqdm(range(start_time_stamp, end_time_stamp), file=sys.stdout):
-            # for time_stamp in range(start_time_stamp, start_time_stamp + 5):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
 
