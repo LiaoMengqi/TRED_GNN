@@ -1,5 +1,5 @@
 import base_model
-from utils import EnhancedDict
+from utils import EnhancedDict,gpu_setting
 import json
 
 def main():
@@ -21,9 +21,13 @@ def main():
     
     stop_step = 5
     decline_step = 0
-    model = base_model.BaseModel(opts)
+    
+    # 自动选择合适的GPU
+    gpu_setting()
+    
+    trainer = base_model.Trainer(opts)
     for epoch in range(opts.epochs):
-        model.train_epoch()
+        trainer.train_epoch()
         """if epoch > 0:
             if model.train_history[-1][1] < model.train_history[-2][1]:
                 decline_step = decline_step + 1

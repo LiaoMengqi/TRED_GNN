@@ -9,7 +9,7 @@ import json
 import time
 
 
-class BaseModel(object):
+class Trainer(object):
     def __init__(self, opts):
         self.opts = opts
         self.n_layer = opts.n_layer

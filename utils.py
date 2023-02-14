@@ -8,7 +8,7 @@ from typing import Optional,List,Dict
 
 import logging
 import os
-
+import re
 
 def get_logger(log_filename: str):
     """指定保存日志的文件路径，日志级别，以及调用文件
@@ -231,6 +231,20 @@ class ElasticEmbedding:
         indices = self.index_matrix[valid_mask]
         data = self.data[indices]
         return *valid_mask.nonzero(),data
+
+
+def gpu_setting():
+    try:
+        gpu = select_gpu()
+    except UnicodeDecodeError:
+        gpu = 0
+    if torch.cuda.is_available():
+        torch.cuda.set_device(gpu)
+        device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
+        print('gpu:', gpu)
+    device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
+    return device,gpu
+
 
 def cal_ranks(scores, labels):
     row_index = np.arange(scores.shape[0])
