@@ -4,10 +4,14 @@ import torch
 from tqdm import tqdm
 import numpy as np
 import sys
+from utils import get_logger
+import json
+import time
 
 
 class BaseModel(object):
     def __init__(self, opts):
+        self.opts = opts
         self.n_layer = opts.n_layer
         self.data = utils.Dataloader(opts.path)
         self.batch_size = opts.batch_size
@@ -17,13 +21,21 @@ class BaseModel(object):
         self.optimizer = torch.optim.Adam(self.tred_gnn.parameters(), lr=opts.lr, weight_decay=opts.lamb)
         self.train_history = []
         self.loss_history = []
+        self.result_dir = "results/TRED-GNN/ICEWS14s"
+        self.logger = get_logger(self.result_dir+"/log.txt")
+        self.now_epoch=0
+        
+        self.logger.info(json.dumps(opts))
 
-    def train(self, output=True):
+    def train_epoch(self, output=True):
+        self.now_epoch+=1
+        self.logger.info(f"Start epoch {self.now_epoch} train")
         if self.data.time_length_train - self.n_layer < 0:
             raise Exception('Error!')
         self.tred_gnn.train()
+        start_time = time.time()
         # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 40), file=sys.stdout):
-        for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train), file=sys.stdout):
+        for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train), file=sys.stdout, disable=self.opts.disable_bar):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
             for i in range(num_batch):
@@ -33,9 +45,7 @@ class BaseModel(object):
                 self.tred_gnn.zero_grad()
                 scores = self.tred_gnn.forward(time_stamp, data_batched[:, 0], data_batched[:, 1])
 
-                pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
-                max_n = torch.max(scores, 1, keepdim=True)[0]
-                loss = torch.sum(- pos_scores + max_n + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
+                loss = self.cal_loss(data_batched, scores)
                 loss.backward()
                 self.loss_history.append(loss.item())
                 self.optimizer.step()
@@ -46,11 +56,35 @@ class BaseModel(object):
                     flag = para_data != para_data
                     para_data[flag] = np.random.random()
                     para.data.copy_(para_data)
-        mrr, ht1, ht10 = self.evaluate()
-        self.train_history.append((self.loss_history[-1], mrr, ht1, ht10))
+        evaluate_time = time.time()
+        self.logger.info(f"Start epoch {self.now_epoch} evaluate")
+        v_mrr, v_h1, v_h3, v_h10, v_h100 = self.evaluate()
+        t_mrr, t_h1, t_h3, t_h10, t_h100 = self.evaluate(data_eval="test")
+        finish_time = time.time()
+        result = {
+            "loss_train":sum(self.loss_history)/len(self.loss_history),
+            "v_mrr":v_mrr,
+            "v_h1":v_h1,
+            "v_h3":v_h3,
+            "v_h10":v_h10,
+            "v_h100":v_h100,
+            "t_mrr":t_mrr,
+            "t_h1":t_h1,
+            "t_h3":t_h3,
+            "t_h10":t_h10,
+            "t_h100":t_h100,
+            "time_train":evaluate_time-start_time,
+            "time_valid":finish_time-evaluate_time
+        }
+        self.train_history.append(result)
+        self.logger.info(f"Finish epoch {self.now_epoch}, result:")
+        self.logger.info(json.dumps(result))
 
-        if output:
-            print('loss : ', self.loss_history[-1], ' mrr : ', mrr, ' hist@1 : ', str(ht1), ' hist@10 : ' + str(ht10))
+    def cal_loss(self, data_batched, scores):
+        pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
+        max_n = torch.max(scores, 1, keepdim=True)[0]
+        loss = torch.sum(- pos_scores + max_n + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
+        return loss
 
     def evaluate(self, data_eval='valid'):
         if data_eval == 'valid':
@@ -67,7 +101,7 @@ class BaseModel(object):
         self.tred_gnn.eval()
         ranks = []
         # for time_stamp in tqdm(range(start_time_stamp, start_time_stamp + 5), file=sys.stdout):
-        for time_stamp in tqdm(range(start_time_stamp, end_time_stamp), file=sys.stdout):
+        for time_stamp in tqdm(range(start_time_stamp, end_time_stamp), file=sys.stdout, disable=self.opts.disable_bar):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
 
@@ -80,5 +114,11 @@ class BaseModel(object):
                 ranks = ranks + rank
 
         ranks = np.array(ranks)
-        mrr, ht1, ht10 = utils.cal_performance(ranks)
-        return mrr, ht1, ht10
+        mrr, h_1, h_3, h_10, h_100 = utils.cal_performance(ranks)
+        return mrr, h_1, h_3, h_10, h_100
+    
+    def process_results(self):
+        with open(self.result_dir+"/history.json","w") as f:
+            json.dump(self.train_history,f)
+        best_result = sorted(self.train_history,key=lambda x:x["v_mrr"],reverse=True)
+        self.logger.info(best_result)
