@@ -7,7 +7,7 @@ import sys
 from utils import get_logger
 import json
 import time
-
+from models import model_dict
 
 class Trainer(object):
     def __init__(self, opts):
@@ -16,18 +16,23 @@ class Trainer(object):
         self.data = utils.Dataloader(opts.path)
         self.batch_size = opts.batch_size
         self.data.load_tkg()
-        self.tred_gnn = models.TRED_GNN(self.data, opts)
+        self.model_name = opts.model_name
+        
+        self.tred_gnn = model_dict[self.model_name](self.data, opts)
         self.tred_gnn.cuda()
         self.optimizer = torch.optim.Adam(self.tred_gnn.parameters(), lr=opts.lr, weight_decay=opts.lamb)
         self.train_history = []
         self.loss_history = []
-        self.result_dir = "results/TRED-GNN/ICEWS14s"
+        if opts.tag is None or len(opts.tag)==0:
+            self.result_dir = f"results/{opts.model_name}/ICEWS14s"
+        else:
+            self.result_dir = f"results/{opts.model_name}/{opts.tag}/ICEWS14s"
         self.logger = get_logger(self.result_dir+"/log.txt")
         self.now_epoch=0
         
         self.logger.info(json.dumps(opts))
 
-    def train_epoch(self, output=True):
+    def train_epoch(self):
         self.now_epoch+=1
         self.logger.info(f"Start epoch {self.now_epoch} train")
         if self.data.time_length_train - self.n_layer < 0:
@@ -83,7 +88,7 @@ class Trainer(object):
     def cal_loss(self, data_batched, scores):
         pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
         max_n = torch.max(scores, 1, keepdim=True)[0]
-        loss = torch.sum(- pos_scores + max_n + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
+        loss = torch.sum(- pos_scores + max_n[:,0] + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
         return loss
 
     def evaluate(self, data_eval='valid'):
@@ -121,4 +126,4 @@ class Trainer(object):
         with open(self.result_dir+"/history.json","w") as f:
             json.dump(self.train_history,f)
         best_result = sorted(self.train_history,key=lambda x:x["v_mrr"],reverse=True)
-        self.logger.info(best_result)
+        self.logger.info("Finish all epoch, the best is "+str(best_result))

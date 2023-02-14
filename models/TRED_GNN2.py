@@ -1,12 +1,24 @@
+# encoding utf-8
+"""
+这一版对原版做了简答的修改，添加了数据管理组件，能够保留旧有的节点。
+缺陷：
+1. 只是保留了旧有节点的表示，并没有允许就有的节点在未来的时间片里继续寻找邻居、
+2. 旧有的探索不经不能真正参与到路线的探索中，限制了候选实体的探索范围。
+应对策略：
+1. 将数据管理组件替换为自环操作，移除数据预处理时向图中添加的自环边。
+2. 在推理获取邻居时，除了正常的搜索邻居，还添加一组自环边，表示旧有的节点进行了时间的演进。
+"""
+
+
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
 from utils import Dataloader, ElasticEmbedding, EnhancedDict
 
 
-class TRED_GNN(nn.Module):
+class TRED_GNN2(nn.Module):
     def __init__(self, data:Dataloader, params:EnhancedDict):
-        super(TRED_GNN, self).__init__()
+        super(TRED_GNN2, self).__init__()
         # 超参数
         self.n_layer = params.n_layer
         self.hidden_dim = params.hidden_dim

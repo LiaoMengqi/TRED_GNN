@@ -2,22 +2,25 @@ import base_model
 from utils import EnhancedDict,gpu_setting
 import json
 
-def main():
+def main(n_layer=5):
     dataset = 'ICEWS14s'
     path = './data/' + dataset + '/'
-
+    
     opts = EnhancedDict()
+    opts.model_name = "TRED_GNN3"
+    
     opts.path = path
-    opts.lr = 0.00005
+    opts.lr = 0.005
     opts.hidden_dim = 64
-    opts.attention_dim = 8
-    opts.n_layer = 6
-    opts.batch_size = 100
+    opts.attention_dim = 5
+    opts.n_layer = n_layer
+    opts.batch_size = 128
     opts.act = 'idd'
     opts.lamb = 0.00012
     opts.dropout = 0.25
-    opts.epochs = 100
+    opts.epochs = 20
     opts.disable_bar = False
+    opts.tag = f"L{opts.n_layer}"
     
     stop_step = 5
     decline_step = 0
@@ -36,10 +39,17 @@ def main():
             if decline_step >= stop_step:
                 print('best : mrr ',model.train_history[-stop_step][1],' hist@1 ',model.train_history[-stop_step][2],' hist@10 ',model.train_history[-stop_step][3])
                 break"""
+    trainer.process_results()
 
     
 
 if __name__ == '__main__':
+    # 本地运行的，方便测试
+    for i in [2,3,5,7,9,11,13,15,20]:
+        main(i)
+    
+    """
+    # 集群上使用的，方便debug
     try:
         main()
     except KeyboardInterrupt:
@@ -48,4 +58,4 @@ if __name__ == '__main__':
         import sys
         import traceback
         traceback.print_exc(file=open("error_log.txt","a"))
-        sys.exit(1)
+        sys.exit(1)"""

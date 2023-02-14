@@ -147,11 +147,7 @@ class Dataloader(object):
         self.fact_sub_matrix = []
         self.graph_extended = []
         for i in range(self.time_length):
-            idd = np.concatenate(
-                [np.expand_dims(np.arange(self.num_entity), 1),
-                 2 * self.num_relation * np.ones((self.num_entity, 1), dtype='int64'),
-                 np.expand_dims(np.arange(self.num_entity), 1)], 1)
-            KG = np.concatenate([self.data_splited[i], idd], 0)
+            KG = self.data_splited[i]
             self.graph_extended.append(KG)
             num_fact = KG.shape[0]
             fsm = csr_matrix((np.ones(num_fact, ), (np.arange(num_fact), KG[:, 0])),
@@ -165,9 +161,14 @@ class Dataloader(object):
         node_1hot = csr_matrix((np.ones(len(nodes)), (nodes[:, 1], nodes[:, 0])),
                                shape=(self.num_entity, nodes.shape[0]))
         edge_1hot = self.fact_sub_matrix[time_stamp].dot(node_1hot)
+        # (edge id,batch_idx)
         edges = np.nonzero(edge_1hot)
+        # (batch_idx, head, rela, tail)
         sampled_edges = np.concatenate([np.expand_dims(edges[1], 1), self.graph_extended[time_stamp][edges[0]]],
                                        axis=1)
+        # 我把预处理时添加的自环边删除了，现在在这添加自环边（和原先的方案自环的覆盖比例不同，这一版能让旧的实体通过自环边前往新的时间片）
+        idd = np.vstack([nodes[:,0], nodes[:,1], np.ones(shape=(nodes.shape[0]))*(self.num_relation_extended-1) ,nodes[:,1]]).T
+        sampled_edges = np.concatenate([sampled_edges,idd],axis=0)
         sampled_edges = torch.LongTensor(sampled_edges).cuda()
         head_nodes, head_index = torch.unique(sampled_edges[:, [0, 1]], dim=0, sorted=True, return_inverse=True)
         tail_nodes, tail_index = torch.unique(sampled_edges[:, [0, 3]], dim=0, sorted=True, return_inverse=True)
