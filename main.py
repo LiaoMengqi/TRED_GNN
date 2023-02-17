@@ -1,14 +1,15 @@
 import base_model
-from utils import EnhancedDict,gpu_setting
+from utils import EnhancedDict, gpu_setting
 import json
+
 
 def main(n_layer=5):
     dataset = 'ICEWS14s'
     path = './data/' + dataset + '/'
-    
+
     opts = EnhancedDict()
-    opts.model_name = "TRED_GNN3"
-    
+    opts.model_name = "TRED_GNN"
+
     opts.path = path
     opts.lr = 0.005
     opts.hidden_dim = 64
@@ -21,13 +22,15 @@ def main(n_layer=5):
     opts.epochs = 20
     opts.disable_bar = False
     opts.tag = f"L{opts.n_layer}"
-    
+    opts.alpha = 0.8
+    opts.copy_hidden_dim = 128
+    opts.copy_output_dim = 16
     stop_step = 5
     decline_step = 0
-    
+
     # 自动选择合适的GPU
     gpu_setting()
-    
+
     trainer = base_model.Trainer(opts)
     for epoch in range(opts.epochs):
         trainer.train_epoch()
@@ -41,13 +44,12 @@ def main(n_layer=5):
                 break"""
     trainer.process_results()
 
-    
 
 if __name__ == '__main__':
     # 本地运行的，方便测试
-    for i in [2,3,5,7,9,11,13,15,20]:
+    for i in [2, 3, 5, 7, 9, 11, 13, 15, 20]:
         main(i)
-    
+
     """
     # 集群上使用的，方便debug
     try:

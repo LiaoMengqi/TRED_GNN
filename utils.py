@@ -46,8 +46,8 @@ class Dataloader(object):
 
     def load_tkg(self):
         self._load()
-        self._split_data()
-        self._load_graph()
+        self._split_data()  # 得到 data_splited
+        self._load_graph()  # 得到 fact_sub_matrix
 
     def _read_dict(self, file_name):
         id_dict = {}
