@@ -22,8 +22,8 @@ def main(n_layer=5):
     opts.epochs = 20
     opts.disable_bar = False
     opts.tag = f"L{opts.n_layer}"
-    opts.alpha = 0.8
-    opts.copy_hidden_dim = 128
+    opts.alpha = 0.7
+    opts.copy_hidden_dim = 64
     opts.copy_output_dim = 16
     stop_step = 5
     decline_step = 0
@@ -47,7 +47,7 @@ def main(n_layer=5):
 
 if __name__ == '__main__':
     # 本地运行的，方便测试
-    for i in [2, 3, 5, 7, 9, 11, 13, 15, 20]:
+    for i in [3, 7, 9, 11, 13, 15, 20]:
         main(i)
 
     """

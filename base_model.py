@@ -22,15 +22,19 @@ class Trainer(object):
 
         # copy mode
         self.alpha = opts.alpha
-        self.copymode = model_dict["Copymode"](opts.copy_hidden_dim, self.data)
-        self.vocabulary = csr_matrix(([], ([], [])), shape=(
+        self.copymode = model_dict["Copymode"](opts.copy_hidden_dim, self.data, self.n_layer)
+        self.vocabulary = []
+        self.vocabulary_all = csr_matrix(([], ([], [])), shape=(
             self.data.num_entity * (self.data.num_relation * 2 + 1), self.data.num_entity))
-        self.update_vocabulary(0, self.n_layer)
         self.copymode.cuda()
 
+        # tred_gnn
         self.tred_gnn = model_dict[self.model_name](self.data, opts)
         self.tred_gnn.cuda()
+
         self.optimizer = torch.optim.Adam(self.tred_gnn.parameters(), lr=opts.lr, weight_decay=opts.lamb)
+        self.sigmoid = nn.Sigmoid()
+
         self.train_history = []
         self.loss_history = []
         if opts.tag is None or len(opts.tag) == 0:
@@ -42,34 +46,17 @@ class Trainer(object):
         self.active = nn.Tanh()
         self.logger.info(json.dumps(opts))
 
-    def update_vocabulary(self, start, end=None):
-        """
-        更新 vocabulary
-        """
-        if not end:
-            end = start + 1
-        for time_stamp in range(start, end):
-            row = self.data.data_splited[time_stamp][:, 0] * self.data.num_relation + self.data.data_splited[
-                                                                                          time_stamp][:, 1]
-            col = self.data.data_splited[time_stamp][:, 2]
-            data = np.ones(len(row))
-            vocabulary_t = csr_matrix((data, (row, col)), shape=(
-                self.data.num_entity * (self.data.num_relation * 2 + 1), self.data.num_entity))
-            self.vocabulary = self.vocabulary + vocabulary_t
-    def reset_vocabulary(self):
-        self.vocabulary = csr_matrix(([], ([], [])), shape=(
-            self.data.num_entity * (self.data.num_relation * 2 + 1), self.data.num_entity))
-
     def train_epoch(self):
+        self.reset_vocabulary()
         self.now_epoch += 1
         self.logger.info(f"Start epoch {self.now_epoch} train")
         if self.data.time_length_train - self.n_layer < 0:
             raise Exception('Error!')
         self.tred_gnn.train()
+        self.copymode.train()
         start_time = time.time()
-        # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 40), file=sys.stdout):
-        for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train), file=sys.stdout,
-                               disable=self.opts.disable_bar):
+        # for time_stamp in tqdm(range(self.n_layer, self.n_layer + 50), file=sys.stdout):
+        for time_stamp in tqdm(range(self.n_layer, self.data.time_length_train), file=sys.stdout,disable=self.opts.disable_bar):
             if time_stamp > self.n_layer:
                 self.update_vocabulary(time_stamp - 1)
             num_query = self.data.data_splited[time_stamp].shape[0]
@@ -81,16 +68,16 @@ class Trainer(object):
                 self.tred_gnn.zero_grad()
                 scores = self.tred_gnn.forward(time_stamp, data_batched[:, 0], data_batched[:, 1])
 
-                vocabulary_index = data_batched[:, 0] * self.data.num_relation + data_batched[:, 1]
-                vocabulary_sampled = torch.Tensor(self.vocabulary[vocabulary_index.cpu()].todense()).cuda()
-                scores_copy = self.copymode.forward(data_batched, time_stamp, vocabulary_sampled)
+                self.copymode.zero_grad()
+                vocabulary_sampled_list, vocabulary_all_sampled = self.vocabulary_sample(data_batched)
+                scores_copy = self.copymode.forward(data_batched, vocabulary_sampled_list, vocabulary_all_sampled)
 
-                scores = self.active(scores)
-                scores_copy = self.active(scores_copy)
-                scores_composed = scores * self.alpha + scores_copy * (1 - self.alpha)
+                scores_composed = self.compose_scores(scores, scores_copy)
 
                 loss = self.cal_loss(data_batched, scores_composed)
+
                 loss.backward()
+
                 self.loss_history.append(loss.item())
                 self.optimizer.step()
 
@@ -124,12 +111,6 @@ class Trainer(object):
         self.logger.info(f"Finish epoch {self.now_epoch}, result:")
         self.logger.info(json.dumps(result))
 
-    def cal_loss(self, data_batched, scores):
-        pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
-        max_n = torch.max(scores, 1, keepdim=True)[0]
-        loss = torch.sum(- pos_scores + max_n[:, 0] + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
-        return loss
-
     def evaluate(self, data_eval='valid'):
         if data_eval == 'valid':
             start_time_stamp = self.data.time_length_train + self.n_layer
@@ -141,26 +122,25 @@ class Trainer(object):
             raise Exception('Error!')
         if start_time_stamp >= end_time_stamp:
             raise Exception('Error!')
-
+        self.reset_vocabulary(start_time_stamp - self.n_layer, update_all=False)
         self.tred_gnn.eval()
+        self.copymode.eval()
         ranks = []
-        # for time_stamp in tqdm(range(start_time_stamp, start_time_stamp + 5), file=sys.stdout):
+        # for time_stamp in tqdm(range(start_time_stamp, start_time_stamp + 10), file=sys.stdout):
         for time_stamp in tqdm(range(start_time_stamp, end_time_stamp), file=sys.stdout, disable=self.opts.disable_bar):
             num_query = self.data.data_splited[time_stamp].shape[0]
             num_batch = num_query // self.batch_size + (num_query % self.batch_size > 0)
-
+            if time_stamp > start_time_stamp:
+                self.update_vocabulary(time_stamp - 1, update_all=False)
             for i in range(num_batch):
                 indexes = range(i * self.batch_size, min((i + 1) * self.batch_size, num_query))
                 data_batched = torch.tensor(self.data.get_batch(time_stamp, indexes)).cuda()
                 scores = self.tred_gnn.forward(time_stamp, data_batched[:, 0], data_batched[:, 1])
 
-                vocabulary_index = data_batched[:, 0] * self.data.num_relation + data_batched[:, 1]
-                vocabulary_sampled = torch.Tensor(self.vocabulary[vocabulary_index.cpu()].todense()).cuda()
-                scores_copy = self.copymode.forward(data_batched, time_stamp, vocabulary_sampled)
+                vocabulary_sampled_list, vocabulary_all_sampled = self.vocabulary_sample(data_batched)
+                scores_copy = self.copymode.forward(data_batched, vocabulary_sampled_list, vocabulary_all_sampled)
 
-                scores = self.active(scores)
-                scores_copy = self.active(scores_copy)
-                scores_composed = scores * self.alpha + scores_copy * (1 - self.alpha)
+                scores_composed = self.compose_scores(scores, scores_copy)
 
                 scores_composed = scores_composed.data.cpu().numpy()
                 rank = utils.cal_ranks(scores_composed, data_batched[:, 2].data.cpu().numpy())
@@ -169,6 +149,58 @@ class Trainer(object):
         ranks = np.array(ranks)
         mrr, h_1, h_3, h_10, h_100 = utils.cal_performance(ranks)
         return mrr, h_1, h_3, h_10, h_100
+
+    def cal_loss(self, data_batched, scores):
+        pos_scores = scores[[torch.arange(len(scores)), data_batched[:, 2]]]
+        max_n = torch.max(scores, 1, keepdim=True)[0]
+        loss = torch.sum(- pos_scores + max_n[:, 0] + torch.log(torch.sum(torch.exp(scores - max_n), 1)))
+        return loss
+
+    def update_vocabulary(self, time_stamp, remove=True, update_all=True):
+        """
+        更新 vocabulary,将时间 time_stamp 的查询 (s,r,?) 的目标实体 o 记录下来
+        """
+        row = self.data.data_splited[time_stamp][:, 0] * self.data.num_relation + self.data.data_splited[
+                                                                                      time_stamp][:, 1]
+        col = self.data.data_splited[time_stamp][:, 2]
+        data = np.ones(len(row))
+        vocabulary_t = csr_matrix((data, (row, col)), shape=(
+            self.data.num_entity * (self.data.num_relation * 2 + 1), self.data.num_entity))
+        if update_all:
+            self.vocabulary_all = self.vocabulary_all + vocabulary_t
+
+        self.vocabulary.append(vocabulary_t)
+
+        if remove:
+            self.vocabulary.pop(0)
+
+    def reset_vocabulary(self, start=0, update_all=True):
+        """
+        重置 vocabulary
+        """
+        self.vocabulary = []
+        for time_stamp in range(start, start + self.n_layer):
+            self.update_vocabulary(time_stamp, False, update_all)
+
+    def vocabulary_sample(self, data_batched):
+        vocabulary_index = (data_batched[:, 0] * self.data.num_relation + data_batched[:, 1]).cpu()
+        vocabulary_sampled_list = []
+        for i in range(self.n_layer):
+            vocabulary_sampled = torch.Tensor(self.vocabulary[i][vocabulary_index].todense())
+            one_hot_vocabulary = vocabulary_sampled.masked_fill(vocabulary_sampled != 0, 1)
+            vocabulary_sampled_list.append(one_hot_vocabulary)
+        vocabulary_all_sampled = torch.Tensor(self.vocabulary_all[vocabulary_index].todense())
+        vocabulary_all_sampled = vocabulary_all_sampled.masked_fill(vocabulary_all_sampled != 0, 1)
+        return vocabulary_sampled_list, vocabulary_all_sampled
+
+    def compose_scores(self, scores, scores_copy):
+
+        # scores_composed = scores * (self.alpha * scores_copy + 1)
+        # 加法
+        # scores = self.sigmoid(scores)
+        # scores_copy = self.sigmoid(scores_copy)
+        scores_composed = scores * self.alpha + scores_copy*(1-self.alpha)
+        return scores_composed
 
     def process_results(self):
         with open(self.result_dir + "/history.json", "w") as f:
